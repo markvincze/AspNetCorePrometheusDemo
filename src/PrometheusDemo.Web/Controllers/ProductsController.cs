@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using PrometheusDemo.Web.Models;
 using System.Linq;
+using System.Diagnostics;
 
 namespace PrometheusDemo.Web.Controllers
 {
@@ -11,6 +12,8 @@ namespace PrometheusDemo.Web.Controllers
     [Route("[controller]")]
     public class ProductsController : Controller
     {
+        private readonly Random rnd = new Random();
+
         private readonly List<Product> products = new List<Product>
         {
             new Product
@@ -36,33 +39,58 @@ namespace PrometheusDemo.Web.Controllers
             },
         };
 
-        public ProductsController()
+        private readonly IMetricsStore metricsStore;
+
+        public ProductsController(IMetricsStore metricsStore)
         {
+            this.metricsStore = metricsStore;
+        }
+
+        private async Task<T> Measure<T>(string route, Func<Task<T>> runWithMeasure)
+        {
+            var sw = Stopwatch.StartNew();
+
+            var result = await runWithMeasure();
+
+            sw.Stop();
+
+            metricsStore.ObserveResponseTimeDuration(route, sw.Elapsed.TotalSeconds);
+
+            return result;
         }
 
         [HttpGet]
         public async Task<IActionResult> List()
         {
-            var rnd = new Random();
+            return await Measure("/products", async () =>
+            {
+                await Task.Delay(rnd.Next(10, 3000));
 
-            await Task.Delay(rnd.Next(100, 400));
-
-            return Ok(products);
+                return Ok(products);
+            });
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> Get(int id)
         {
-            var rnd = new Random();
+            return await Measure("/products/{id}", async () =>
+            {
+                await Task.Delay(rnd.Next(50, 150));
 
-            await Task.Delay(rnd.Next(50, 200));
+                var product = products.FirstOrDefault(p => p.Id == id);
+
+                return Ok(product);
+            });
+        }
+
+        [HttpPost("purchase/{id}")]
+        public async Task<IActionResult> Purchase(int id)
+        {
+            await Task.Delay(rnd.Next(200, 500));
 
             var product = products.FirstOrDefault(p => p.Id == id);
 
-            if(product == null)
-            {
-                return NotFound();
-            }
+            metricsStore.ObserveProductPurchased(product.Category);
 
             return Ok(product);
         }
